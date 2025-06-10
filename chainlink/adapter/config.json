@@ -1,0 +1,36 @@
+{
+  "initiators": [
+    {
+      "type": "external",
+      "params": {
+        "name": "flight-data",
+        "body": {
+          "endpoint": "flight-data",
+          "flightNumber": "",
+          "airline": ""
+        }
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "type": "flight-data",
+      "params": {
+        "endpoint": "flight-data",
+        "flightNumber": "$(flightNumber)",
+        "airline": "$(airline)"
+      }
+    },
+    {
+      "type": "sui",
+      "params": {
+        "contractAddress": "$(contractAddress)",
+        "function": "submit_flight_data",
+        "args": [
+          "$(flightNumber)",
+          "$(actualArrival)"
+        ]
+      }
+    }
+  ]
+} 

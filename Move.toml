@@ -1,0 +1,10 @@
+[package]
+name = "flight_delay_insurance"
+version = "0.1.0"
+published-at = ""
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework" }
+
+[addresses]
+flight_insurance = "0x0" 
