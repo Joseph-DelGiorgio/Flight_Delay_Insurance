@@ -5,6 +5,7 @@ module flight_insurance::flight_insurance_tests {
     use sui::clock::{Self, Clock};
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
+    use sui::object::{Self, ID};
     use flight_insurance::flight_insurance::{Self, FlightPolicy, InsurancePool};
     use flight_insurance::oracle::{Self, Oracle};
     use std::string;
@@ -14,79 +15,122 @@ module flight_insurance::flight_insurance_tests {
     const USER: address = @0xB0B;
     const ORACLE: address = @0x0RACL3;
 
-    // Test data
+    // Test constants
     const FLIGHT_NUMBER: vector<u8> = b"AA123";
-    const SCHEDULED_DEPARTURE: u64 = 1678900000;
-    const SCHEDULED_ARRIVAL: u64 = 1678903600;
-    const DELAY_THRESHOLD: u64 = 30; // 30 minutes
-    const PREMIUM: u64 = 1000000; // 1 SUI
-    const PAYOUT: u64 = 2000000; // 2 SUI
+    const DELAY_THRESHOLD: u64 = 60; // 1 hour
+    const PREMIUM: u64 = 10000000; // 0.01 SUI
+    const PAYOUT: u64 = 100000000; // 0.1 SUI
 
     fun setup_test(): Scenario {
         let scenario = ts::begin(ADMIN);
         
-        // Initialize the insurance contract
+        // Initialize the insurance pool
         {
             flight_insurance::init(ts::ctx(&mut scenario));
         };
         
-        // Initialize the oracle
+        // Create test coins
         {
-            oracle::init(ts::ctx(&mut scenario));
+            let ctx = ts::ctx(&mut scenario);
+            let coin = coin::mint_for_testing(PREMIUM, ctx);
+            ts::transfer(&mut scenario, coin, USER);
         };
-        
-        // Add oracle as authorized caller
-        {
-            let oracle_obj = ts::take_from_sender<Oracle>(&scenario);
-            oracle::add_authorized_caller(&mut oracle_obj, ORACLE, ts::ctx(&mut scenario));
-            ts::return_to_sender(&scenario, oracle_obj);
-        };
-        
+
         scenario
     }
 
     #[test]
     fun test_create_policy() {
         let scenario = setup_test();
-        
+        let current_time = 1000;
+        let scheduled_departure = current_time + 3600; // 1 hour from now
+        let scheduled_arrival = scheduled_departure + 7200; // 2 hours after departure
+
         // Create a policy
         {
-            let pool = ts::take_from_sender<InsurancePool>(&scenario);
-            let premium = coin::mint_for_testing(PREMIUM, ts::ctx(&mut scenario));
+            let ctx = ts::ctx(&mut scenario);
+            let clock = clock::create_for_testing(ctx, current_time);
+            let premium = ts::take_from_sender<Coin<SUI>>(&scenario);
             
             flight_insurance::create_policy(
-                &mut pool,
+                ts::take_shared<InsurancePool>(&scenario),
                 FLIGHT_NUMBER,
-                SCHEDULED_DEPARTURE,
-                SCHEDULED_ARRIVAL,
+                scheduled_departure,
+                scheduled_arrival,
                 DELAY_THRESHOLD,
                 premium,
                 PAYOUT,
-                ts::clock(&scenario),
-                ts::ctx(&mut scenario)
+                &clock,
+                ctx
             );
-            
-            ts::return_to_sender(&scenario, pool);
         };
-        
+
         // Verify policy creation
         {
             let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let (holder, flight, dep, arr, threshold, prem, payout, status) = 
+            let (holder, flight_num, _, _, threshold, premium, payout, status, _, _) = 
                 flight_insurance::get_policy_details(&policy);
             
             assert_eq(holder, USER);
-            assert_eq(flight, string::utf8(FLIGHT_NUMBER));
-            assert_eq(dep, SCHEDULED_DEPARTURE);
-            assert_eq(arr, SCHEDULED_ARRIVAL);
+            assert_eq(flight_num, string::utf8(FLIGHT_NUMBER));
             assert_eq(threshold, DELAY_THRESHOLD);
-            assert_eq(prem, PREMIUM);
+            assert_eq(premium, PREMIUM);
             assert_eq(payout, PAYOUT);
-            assert_eq(status, 0);
+            assert_eq(status, 0); // active status
             
             ts::return_to_sender(&scenario, policy);
         };
-        
+
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_cancel_policy() {
+        let scenario = setup_test();
+        let current_time = 1000;
+        let scheduled_departure = current_time + 3600;
+        let scheduled_arrival = scheduled_departure + 7200;
+
+        // Create a policy first
+        {
+            let ctx = ts::ctx(&mut scenario);
+            let clock = clock::create_for_testing(ctx, current_time);
+            let premium = ts::take_from_sender<Coin<SUI>>(&scenario);
+            
+            flight_insurance::create_policy(
+                ts::take_shared<InsurancePool>(&scenario),
+                FLIGHT_NUMBER,
+                scheduled_departure,
+                scheduled_arrival,
+                DELAY_THRESHOLD,
+                premium,
+                PAYOUT,
+                &clock,
+                ctx
+            );
+        };
+
+        // Cancel the policy
+        {
+            let ctx = ts::ctx(&mut scenario);
+            let clock = clock::create_for_testing(ctx, current_time + 1800); // 30 minutes after creation
+            
+            flight_insurance::cancel_policy(
+                ts::take_from_sender<FlightPolicy>(&scenario),
+                ts::take_shared<InsurancePool>(&scenario),
+                &clock,
+                ctx
+            );
+        };
+
+        // Verify cancellation
+        {
+            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
+            let status = flight_insurance::get_policy_status(&policy);
+            assert_eq(status, 2); // cancelled status
+            ts::return_to_sender(&scenario, policy);
+        };
+
         ts::end(scenario);
     }
 

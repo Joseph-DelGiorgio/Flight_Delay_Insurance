@@ -3,17 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@mysten/sui.js": "^0.40.0",
-    "@emotion/react": "^11.11.0",
+    "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "@mui/material": "^5.13.0",
     "@mui/icons-material": "^5.11.16",
-    "@mui/x-data-grid": "^6.5.0",
+    "@mui/lab": "^5.0.0-alpha.129",
+    "@mui/material": "^5.11.16",
+    "@mui/x-data-grid": "^6.0.4",
+    "@mui/x-date-pickers": "^6.18.7",
+    "@mysten/dapp-kit": "^0.16.10",
+    "@mysten/sui.js": "^0.40.0",
+    "@mysten/wallet-kit": "^0.8.6",
+    "@suiet/wallet-kit": "^0.4.1",
+    "@tailwindcss/forms": "^0.5.10",
+    "@tanstack/react-query": "^5.0.0",
+    "ajv": "^6.12.6",
+    "ajv-keywords": "^3.5.2",
+    "autoprefixer": "^10.4.21",
     "axios": "^1.4.0",
+    "date-fns": "^2.30.0",
+    "postcss": "^8.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.11.1",
     "react-scripts": "5.0.1",
+    "schema-utils": "^3.3.0",
+    "tailwindcss": "^4.1.8",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
@@ -40,4 +54,4 @@
       "last 1 safari version"
     ]
   }
-} 
+}
