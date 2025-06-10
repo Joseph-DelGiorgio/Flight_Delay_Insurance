@@ -23,30 +23,24 @@ function Navbar() {
               flexGrow: 1,
               textDecoration: 'none',
               color: 'inherit',
-              fontWeight: 'bold'
+              display: 'flex',
+              alignItems: 'center'
             }}
           >
-            Flight Insurance
+            Flight Delay Insurance
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <Button
-              color="inherit"
-              component={RouterLink}
-              to="/"
-            >
-              Home
-            </Button>
+          <Box sx={{ display: 'flex', gap: 2 }}>
             <Button
               color="inherit"
               component={RouterLink}
               to="/flight-insurance"
             >
-              Get Insurance
+              Buy Insurance
             </Button>
             <Button
               color="inherit"
               component={RouterLink}
-              to="/my-policies"
+              to="/policies"
             >
               My Policies
             </Button>
