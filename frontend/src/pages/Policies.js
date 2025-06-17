@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -14,7 +15,10 @@ import {
   useTheme,
   useMediaQuery,
   IconButton,
-  Tooltip
+  Tooltip,
+  List,
+  ListItem,
+  ListItemText
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWalletKit } from '@mysten/wallet-kit';
@@ -176,13 +180,20 @@ function PolicyCard({ policy, onRefresh }) {
   );
 }
 
-function Policies() {
-  const { currentAccount } = useWalletKit();
+const Policies = () => {
+  const navigate = useNavigate();
+  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  useEffect(() => {
+    if (currentAccount) {
+      fetchPolicies();
+    }
+  }, [currentAccount]);
 
   const fetchPolicies = async () => {
     if (!currentAccount) {
@@ -192,8 +203,17 @@ function Policies() {
     }
 
     try {
-      const result = await contractService.getPolicies(currentAccount);
-      setPolicies(result);
+      const result = await contractService.getPolicies(currentAccount.address);
+      // Parse the returned data into a more usable format
+      const parsedPolicies = result.map(policy => ({
+        id: policy[0], // Assuming the first element is the policy ID
+        flightNumber: policy[1],
+        airline: policy[2],
+        departureDate: new Date(parseInt(policy[3])).toLocaleString(),
+        coverageAmount: policy[4],
+        status: policy[5]
+      }));
+      setPolicies(parsedPolicies);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -204,7 +224,7 @@ function Policies() {
   const handleClaim = async (policyId) => {
     try {
       setLoading(true);
-      await contractService.claimCompensation(currentAccount, policyId);
+      await contractService.claimCompensation(signAndExecuteTransaction, policyId);
       await fetchPolicies(); // Refresh the policies list
     } catch (err) {
       setError(err.message);
@@ -213,60 +233,94 @@ function Policies() {
     }
   };
 
-  useEffect(() => {
-    fetchPolicies();
-  }, [currentAccount]);
+  const handleViewDetails = (policyId) => {
+    navigate(`/policy/${policyId}`);
+  };
+
+  if (!currentAccount) {
+    return (
+      <Container maxWidth="md">
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Typography variant="h5">Please connect your wallet to view your policies</Typography>
+        </Box>
+      </Container>
+    );
+  }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Your Insurance Policies
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            View and manage your flight insurance policies
-          </Typography>
-        </Box>
+    <Container maxWidth="md">
+      <Box sx={{ mt: 4, mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Your Insurance Policies
+        </Typography>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 4 }}>
-            {error}
-          </Alert>
-        )}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
             <CircularProgress />
           </Box>
         ) : policies.length === 0 ? (
-          <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <Typography variant="h6" gutterBottom>
-              No Policies Found
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              You haven't purchased any flight insurance policies yet.
-            </Typography>
-          </Paper>
+          <Typography variant="body1" sx={{ mt: 2 }}>
+            No policies found. Purchase your first policy!
+          </Typography>
         ) : (
-          <Grid container spacing={3}>
+          <List>
             {policies.map((policy) => (
-              <Grid item xs={12} sm={6} md={4} key={policy.id}>
-                <PolicyCard 
-                  policy={policy} 
-                  onRefresh={handleClaim}
+              <ListItem
+                key={policy.id}
+                sx={{
+                  border: '1px solid #ddd',
+                  borderRadius: 1,
+                  mb: 2,
+                  '&:hover': {
+                    backgroundColor: '#f5f5f5'
+                  }
+                }}
+              >
+                <ListItemText
+                  primary={`Flight ${policy.flightNumber} - ${policy.airline}`}
+                  secondary={
+                    <>
+                      <Typography component="span" variant="body2">
+                        Departure: {policy.departureDate}
+                      </Typography>
+                      <br />
+                      <Typography component="span" variant="body2">
+                        Coverage: {policy.coverageAmount} SUI
+                      </Typography>
+                      <br />
+                      <Typography component="span" variant="body2">
+                        Status: {policy.status}
+                      </Typography>
+                    </>
+                  }
                 />
-              </Grid>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => handleViewDetails(policy.id)}
+                  >
+                    View Details
+                  </Button>
+                  {policy.status === 'ACTIVE' && (
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => handleClaim(policy.id)}
+                      disabled={loading}
+                    >
+                      Claim
+                    </Button>
+                  )}
+                </Box>
+              </ListItem>
             ))}
-          </Grid>
+          </List>
         )}
-      </motion.div>
+      </Box>
     </Container>
   );
-}
+};
 
 export default Policies; 

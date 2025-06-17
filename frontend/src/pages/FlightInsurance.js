@@ -60,7 +60,7 @@ const itemVariants = {
 
 function FlightInsurance() {
   const navigate = useNavigate();
-  const { currentAccount } = useWalletKit();
+  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -158,14 +158,26 @@ function FlightInsurance() {
   };
 
   const handleSubmit = async () => {
+    if (!currentAccount) {
+      setError('Please connect your wallet first');
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
       setSuccess('');
 
-      const result = await contractService.purchaseInsurance(
-        currentAccount,
-        formData,
+      // Convert departureDate to timestamp (u64)
+      const departureTimestamp = new Date(formData.departureDate).getTime();
+
+      // Calculate premium (for now, using a simple 5% of coverage amount)
+      const premium = parseFloat(formData.coverageAmount) * 0.05;
+
+      // Create transaction
+      const txb = await contractService.purchaseInsurance(
+        { signAndExecuteTransaction },
+        { ...formData, departureDate: departureTimestamp },
         parseFloat(formData.coverageAmount)
       );
 

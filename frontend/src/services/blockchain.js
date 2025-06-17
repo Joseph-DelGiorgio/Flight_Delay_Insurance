@@ -1,7 +1,7 @@
 import { JsonRpcProvider, Connection } from '@mysten/sui.js';
 
 // Configuration
-const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
+const CONTRACT_ADDRESS = '0x6b20aff2d7f3d65d87e4569cc2f418c673eaed4e2cdb784be45da1e298827579';
 const NETWORK = process.env.REACT_APP_NETWORK || 'testnet';
 
 // Initialize provider

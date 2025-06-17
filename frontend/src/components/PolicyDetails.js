@@ -37,6 +37,10 @@ const PolicyDetails = () => {
 
   const loadPolicy = async () => {
     try {
+      // TODO: Use contractService.getPolicyDetails if this file is used
+      // const details = await contractService.getPolicyDetails(id);
+      // setPolicy(details);
+      // For now, keep existing logic
       const policies = await fetchPolicies(currentAccount.address);
       const foundPolicy = policies.find(p => p.id === id);
       if (foundPolicy) {
@@ -61,6 +65,8 @@ const PolicyDetails = () => {
     setError('');
 
     try {
+      // TODO: Use contractService.claimCompensation if this file is used
+      // await contractService.claimCompensation(currentAccount.address, id);
       await claimPolicy(currentAccount.address, signAndExecuteTransaction, id);
       await loadPolicy(); // Reload policy to update status
     } catch (err) {

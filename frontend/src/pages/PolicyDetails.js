@@ -66,25 +66,32 @@ const itemVariants = {
 function PolicyDetails() {
   const { policyId } = useParams();
   const navigate = useNavigate();
-  const { currentAccount } = useWalletKit();
+  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [flightStatus, setFlightStatus] = useState(null);
+  const [claimLoading, setClaimLoading] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const fetchPolicyDetails = async () => {
     try {
-      const details = await contractService.getPolicyDetails(policyId);
-      setPolicy(details);
-      
+      const result = await contractService.getPolicyDetails(policyId);
+      // Parse the returned data into a more usable format
+      const parsedPolicy = {
+        id: result[0],
+        flightNumber: result[1],
+        airline: result[2],
+        departureDate: new Date(parseInt(result[3])).toLocaleString(),
+        coverageAmount: result[4],
+        status: result[5],
+        premium: result[6],
+        claimAmount: result[7]
+      };
+      setPolicy(parsedPolicy);
       // Fetch current flight status
-      const status = await flightService.getFlightStatus(
-        details.flightNumber,
-        details.airline
-      );
-      setFlightStatus(status);
+      // TODO: Use contractService.checkFlightStatus if needed
     } catch (err) {
       setError(err.message);
     } finally {
@@ -103,13 +110,13 @@ function PolicyDetails() {
 
   const handleClaim = async () => {
     try {
-      setLoading(true);
-      await contractService.claimCompensation(currentAccount, policyId);
+      setClaimLoading(true);
+      await contractService.claimCompensation(signAndExecuteTransaction, policyId);
       await fetchPolicyDetails(); // Refresh policy details
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      setClaimLoading(false);
     }
   };
 
@@ -141,193 +148,133 @@ function PolicyDetails() {
     }
   };
 
+  if (!currentAccount) {
+    return (
+      <Container maxWidth="md">
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Typography variant="h5">Please connect your wallet to view policy details</Typography>
+        </Box>
+      </Container>
+    );
+  }
+
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
-        <CircularProgress />
+      <Container maxWidth="md">
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+          <CircularProgress />
+        </Box>
       </Container>
     );
   }
 
   if (error) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/policies')}
-        >
-          Back to Policies
-        </Button>
+      <Container maxWidth="md">
+        <Alert severity="error" sx={{ mt: 4 }}>{error}</Alert>
+      </Container>
+    );
+  }
+
+  if (!policy) {
+    return (
+      <Container maxWidth="md">
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Typography variant="h5">Policy not found</Typography>
+        </Box>
       </Container>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <Box sx={{ mb: 4 }}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/policies')}
-            sx={{ mb: 2 }}
-          >
-            Back to Policies
-          </Button>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Policy Details
-          </Typography>
-        </Box>
+    <Container maxWidth="md">
+      <Box sx={{ mt: 4, mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Policy Details
+        </Typography>
 
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={8}>
-            <motion.div variants={itemVariants}>
-              <Paper sx={{ p: 3, mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-                  <Typography variant="h5" component="h2">
-                    {policy.airline} {policy.flightNumber}
-                  </Typography>
-                  <Chip 
-                    label={policy.status} 
-                    color={getStatusColor(policy.status)}
-                  />
-                </Box>
-
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <FlightTakeoffIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="body1">
-                        {policy.departureAirport} → {policy.arrivalAirport}
-                      </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <AccessTimeIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="body1">
-                        {new Date(policy.departureDate).toLocaleDateString()}
-                      </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <AccountBalanceWalletIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="body1">
-                        Coverage: ₽{policy.coverageAmount}
-                      </Typography>
-                    </Box>
-                  </Grid>
-                </Grid>
-
-                {flightStatus && (
-                  <Box sx={{ mt: 3, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Current Flight Status
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6}>
-                        <Typography variant="body2" color="text.secondary">
-                          Status: {flightStatus.status}
-                        </Typography>
-                        {flightStatus.isDelayed && (
-                          <Typography variant="body2" color="error">
-                            Delay: {flightStatus.departure.delay} minutes
-                          </Typography>
-                        )}
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <Typography variant="body2" color="text.secondary">
-                          Scheduled: {new Date(flightStatus.departure.scheduled).toLocaleString()}
-                        </Typography>
-                        {flightStatus.departure.estimated && (
-                          <Typography variant="body2" color="text.secondary">
-                            Estimated: {new Date(flightStatus.departure.estimated).toLocaleString()}
-                          </Typography>
-                        )}
-                      </Grid>
-                    </Grid>
-                  </Box>
-                )}
-              </Paper>
-            </motion.div>
-
-            <motion.div variants={itemVariants}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                  Claim History
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Flight Number
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.flightNumber}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Airline
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.airline}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Departure Date
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.departureDate}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Coverage Amount
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.coverageAmount} SUI
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Premium
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.premium} SUI
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="subtitle1" color="text.secondary">
+                Status
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                {policy.status}
+              </Typography>
+            </Grid>
+            {policy.status === 'claimed' && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" color="text.secondary">
+                  Claim Amount
                 </Typography>
-                <Timeline>
-                  {policy.claimHistory.map((claim, index) => (
-                    <TimelineItem key={index}>
-                      <TimelineSeparator>
-                        <TimelineDot color={claim.status === 'success' ? 'success' : 'error'}>
-                          {getTimelineIcon(claim.status)}
-                        </TimelineDot>
-                        {index < policy.claimHistory.length - 1 && <TimelineConnector />}
-                      </TimelineSeparator>
-                      <TimelineContent>
-                        <Typography variant="subtitle2">
-                          {claim.status === 'success' ? 'Claim Approved' : 'Claim Rejected'}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {new Date(claim.timestamp).toLocaleString()}
-                        </Typography>
-                        {claim.amount && (
-                          <Typography variant="body2">
-                            Amount: ₽{claim.amount}
-                          </Typography>
-                        )}
-                        {claim.reason && (
-                          <Typography variant="body2" color="error">
-                            Reason: {claim.reason}
-                          </Typography>
-                        )}
-                      </TimelineContent>
-                    </TimelineItem>
-                  ))}
-                </Timeline>
-              </Paper>
-            </motion.div>
+                <Typography variant="body1" gutterBottom>
+                  {policy.claimAmount} SUI
+                </Typography>
+              </Grid>
+            )}
           </Grid>
 
-          <Grid item xs={12} md={4}>
-            <motion.div variants={itemVariants}>
-              <Paper sx={{ p: 3, position: 'sticky', top: 24 }}>
-                <Typography variant="h6" gutterBottom>
-                  Policy Actions
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {flightStatus?.isDelayed && policy.status === 'active' && (
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      fullWidth
-                      onClick={handleClaim}
-                      disabled={loading}
-                    >
-                      Claim Compensation
-                    </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    fullWidth
-                    onClick={() => window.print()}
-                  >
-                    Download Policy
-                  </Button>
-                </Box>
-              </Paper>
-            </motion.div>
-          </Grid>
-        </Grid>
-      </motion.div>
+          <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+            <Button
+              variant="outlined"
+              onClick={() => navigate('/policies')}
+            >
+              Back to Policies
+            </Button>
+            {policy.status === 'active' && (
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleClaim}
+                disabled={claimLoading}
+              >
+                {claimLoading ? 'Processing...' : 'Claim Compensation'}
+              </Button>
+            )}
+          </Box>
+        </Paper>
+      </Box>
     </Container>
   );
 }
