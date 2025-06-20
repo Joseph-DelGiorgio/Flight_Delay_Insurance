@@ -57,8 +57,26 @@ const itemVariants = {
 };
 
 function FlightInsurance() {
-  const navigate = useNavigate();
   const { currentAccount } = useWalletKit();
+
+  if (!currentAccount) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4, textAlign: 'center' }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Connect Your Wallet
+        </Typography>
+        <Typography variant="body1">
+          Please connect your Sui wallet to purchase flight insurance.
+        </Typography>
+      </Container>
+    );
+  }
+
+  return <FlightInsuranceFlow currentAccount={currentAccount} />;
+}
+
+function FlightInsuranceFlow({ currentAccount }) {
+  const navigate = useNavigate();
   const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction({
     onSuccess: () => {
       setSuccess('Insurance purchased successfully!');
@@ -440,7 +458,7 @@ function FlightInsurance() {
                   <Typography variant="subtitle2" color="text.secondary">
                     Policy
                   </Typography>
-                  <Typography variant="body1">
+                  <Typography variant="body1" component="div">
                     Package: <Chip label={formData.insurancePackage} size="small" sx={{ textTransform: 'capitalize' }} />
                   </Typography>
                   <Typography variant="body1">

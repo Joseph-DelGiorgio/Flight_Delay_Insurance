@@ -7,8 +7,6 @@ import {
   Button,
   CircularProgress,
   Alert,
-  useTheme,
-  useMediaQuery,
   Grid,
   Card,
   CardContent,
@@ -18,6 +16,7 @@ import {
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import { useWalletKit } from '@mysten/wallet-kit';
+import { useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
 import { contractService } from '../services/contractService';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
@@ -95,62 +94,44 @@ function PolicyCard({ policy, onClaim, onViewDetails, loading }) {
   );
 }
 
+function PoliciesList({ currentAccount, policies, onClaim, onViewDetails, loading, error }) {
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>;
+  }
+
+  if (policies.length === 0) {
+    return (
+      <Typography variant="body1" sx={{ mt: 2 }}>
+        No policies found. Purchase your first policy!
+      </Typography>
+    );
+  }
+
+  return (
+    <Grid container spacing={3}>
+      {policies.map((policy) => (
+        <PolicyCard 
+          key={policy.id} 
+          policy={policy} 
+          onClaim={onClaim}
+          onViewDetails={onViewDetails}
+          loading={loading}
+        />
+      ))}
+    </Grid>
+  );
+}
+
 const Policies = () => {
-  const navigate = useNavigate();
-  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
-  const [policies, setPolicies] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const theme = useTheme();
-  useMediaQuery(theme.breakpoints.down('sm'));
-
-  const fetchPolicies = useCallback(async () => {
-    if (!currentAccount) {
-      setError('Please connect your wallet to view your policies');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const result = await contractService.getPolicies(currentAccount.address);
-      const parsedPolicies = result.map(policy => ({
-        id: policy[0],
-        flightNumber: policy[1],
-        airline: policy[2],
-        departureDate: new Date(parseInt(policy[3])).toLocaleString(),
-        coverageAmount: policy[4],
-        status: policy[5]
-      }));
-      setPolicies(parsedPolicies);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentAccount]);
-
-  useEffect(() => {
-    if (currentAccount) {
-      fetchPolicies();
-    }
-  }, [currentAccount, fetchPolicies]);
-
-  const handleClaim = async (policyId) => {
-    try {
-      setLoading(true);
-      await contractService.claimCompensation(signAndExecuteTransaction, policyId);
-      await fetchPolicies(); // Refresh the policies list
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleViewDetails = (policyId) => {
-    navigate(`/policy/${policyId}`);
-  };
+  const { currentAccount } = useWalletKit();
 
   if (!currentAccount) {
     return (
@@ -162,6 +143,55 @@ const Policies = () => {
     );
   }
 
+  return <PoliciesContainer currentAccount={currentAccount} />;
+};
+
+const PoliciesContainer = ({ currentAccount }) => {
+  const navigate = useNavigate();
+  const client = useSuiClient();
+  const [policies, setPolicies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
+
+  const fetchPolicies = useCallback(async () => {
+    if (!currentAccount) return;
+    try {
+      setError('');
+      setLoading(true);
+      const result = await contractService.getPolicies(client, currentAccount.address);
+      setPolicies(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentAccount, client]);
+
+  useEffect(() => {
+    fetchPolicies();
+  }, [fetchPolicies]);
+
+  const handleClaim = (policyId) => {
+    const txb = contractService.claimCompensationTransaction(policyId);
+    signAndExecuteTransaction(
+      { transactionBlock: txb },
+      {
+        onSuccess: () => {
+          fetchPolicies(); // Refresh the policies list
+        },
+        onError: (err) => {
+          setError(err.message);
+        },
+      }
+    );
+  };
+
+  const handleViewDetails = (policyId) => {
+    navigate(`/policies/${policyId}`);
+  };
+
   return (
     <Container maxWidth="md">
       <Box sx={{ mt: 4, mb: 4 }}>
@@ -169,32 +199,16 @@ const Policies = () => {
           Your Insurance Policies
         </Typography>
 
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-            <CircularProgress />
-          </Box>
-        ) : policies.length === 0 ? (
-          <Typography variant="body1" sx={{ mt: 2 }}>
-            No policies found. Purchase your first policy!
-          </Typography>
-        ) : (
-          <Grid container spacing={3}>
-            {policies.map((policy) => (
-              <PolicyCard 
-                key={policy.id} 
-                policy={policy} 
-                onClaim={handleClaim}
-                onViewDetails={handleViewDetails}
-                loading={loading}
-              />
-            ))}
-          </Grid>
-        )}
+        <PoliciesList
+          policies={policies}
+          onClaim={handleClaim}
+          onViewDetails={handleViewDetails}
+          loading={loading}
+          error={error}
+        />
       </Box>
     </Container>
   );
-};
+}
 
 export default Policies; 

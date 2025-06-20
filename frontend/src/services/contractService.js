@@ -1,14 +1,7 @@
-import { JsonRpcProvider, Connection, TransactionBlock } from '@mysten/sui.js';
+import { TransactionBlock } from '@mysten/sui.js';
 
-// Initialize Sui client
-const connection = new Connection({
-  fullnode: 'https://fullnode.devnet.sui.io', // Using devnet
-  faucet: 'https://faucet.devnet.sui.io',
-});
-const provider = new JsonRpcProvider(connection);
-
-const CONTRACT_ADDRESS = '0xa3c42824eb667f74c42a76a62d218e420d7031459350ac52ac34e133008a0974'; 
-const INSURANCE_POOL_ID = '0xa9460a5641a90dba113a7e1bdeb83125769101028b3612c830c4a5420f725c7c'; 
+const CONTRACT_ADDRESS = '0xa3c42824eb667f74c42a76a62d218e420d7031459350ac52ac34e133008a0974';
+const INSURANCE_POOL_ID = '0xa9460a5641a90dba113a7e1bdeb83125769101028b3612c830c4a5420f725c7c';
 
 export const contractService = {
   createPolicyTransaction(flightDetails, coverageAmount, premiumAmount) {
@@ -40,12 +33,12 @@ export const contractService = {
     }
   },
 
-  async getPolicies(walletAddress) {
+  async getPolicies(client, walletAddress) {
     if (!walletAddress) {
       return [];
     }
     try {
-      const policyObjects = await provider.getOwnedObjects({
+      const policyObjects = await client.getOwnedObjects({
         owner: walletAddress,
         filter: { StructType: `${CONTRACT_ADDRESS}::flight_insurance::Policy` },
         options: { showContent: true, showType: true },
@@ -70,9 +63,9 @@ export const contractService = {
     }
   },
 
-  async getPolicyDetails(policyId) {
+  async getPolicyDetails(client, policyId) {
     try {
-      const response = await provider.getObject({
+      const response = await client.getObject({
         id: policyId,
         options: { showContent: true },
       });

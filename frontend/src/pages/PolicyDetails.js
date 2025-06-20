@@ -22,6 +22,7 @@ import {
   TimelineDot
 } from '@mui/lab';
 import { useWalletKit } from '@mysten/wallet-kit';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { contractService } from '../services/contractService';
 import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -30,58 +31,8 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import PaidIcon from '@mui/icons-material/Paid';
 
 function PolicyDetails() {
-  const { policyId } = useParams();
-  const navigate = useNavigate();
-  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
-  const [policy, setPolicy] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [claimLoading, setClaimLoading] = useState(false);
-  const theme = useTheme();
-  useMediaQuery(theme.breakpoints.down('sm'));
-
-  const fetchPolicyDetails = useCallback(async () => {
-    try {
-      const result = await contractService.getPolicyDetails(policyId);
-      // Parse the returned data into a more usable format
-      const parsedPolicy = {
-        id: result[0],
-        flightNumber: result[1],
-        airline: result[2],
-        departureDate: new Date(parseInt(result[3])).toLocaleString(),
-        coverageAmount: result[4],
-        status: result[5],
-        premium: result[6],
-        claimAmount: result[7]
-      };
-      setPolicy(parsedPolicy);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [policyId]);
-
-  useEffect(() => {
-    if (currentAccount) {
-      fetchPolicyDetails();
-    } else {
-      setError('Please connect your wallet to view policy details');
-      setLoading(false);
-    }
-  }, [currentAccount, policyId, fetchPolicyDetails]);
-
-  const handleClaim = async () => {
-    try {
-      setClaimLoading(true);
-      await contractService.claimCompensation(signAndExecuteTransaction, policyId);
-      await fetchPolicyDetails(); // Refresh policy details
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setClaimLoading(false);
-    }
-  };
+  const { currentAccount } = useWalletKit();
+  const { id: policyId } = useParams();
 
   if (!currentAccount) {
     return (
@@ -92,6 +43,52 @@ function PolicyDetails() {
       </Container>
     );
   }
+
+  return <PolicyDetailsContainer policyId={policyId} />;
+}
+
+function PolicyDetailsContainer({ policyId }) {
+  const navigate = useNavigate();
+  const [policy, setPolicy] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const { mutate: signAndExecuteTransaction, isPending: claimLoading } = useSignAndExecuteTransaction();
+
+  const fetchPolicyDetails = useCallback(async () => {
+    try {
+      setError('');
+      setLoading(true);
+      const result = await contractService.getPolicyDetails(policyId);
+      setPolicy(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [policyId]);
+
+  useEffect(() => {
+    fetchPolicyDetails();
+  }, [fetchPolicyDetails]);
+
+  const handleClaim = () => {
+    const txb = contractService.claimCompensationTransaction(policyId);
+    signAndExecuteTransaction(
+      { transactionBlock: txb },
+      {
+        onSuccess: () => {
+          fetchPolicyDetails();
+        },
+        onError: (err) => {
+          setError(err.message);
+        },
+      }
+    );
+  };
+  
+  const handleBack = () => {
+    navigate('/policies');
+  };
 
   if (loading) {
     return (
@@ -120,6 +117,20 @@ function PolicyDetails() {
       </Container>
     );
   }
+
+  return (
+    <PolicyDetailsView
+      policy={policy}
+      onClaim={handleClaim}
+      onBack={handleBack}
+      claimLoading={claimLoading}
+    />
+  );
+}
+
+function PolicyDetailsView({ policy, onClaim, onBack, claimLoading }) {
+  const theme = useTheme();
+  useMediaQuery(theme.breakpoints.down('sm'));
 
   return (
     <Container maxWidth="md">
@@ -250,21 +261,13 @@ function PolicyDetails() {
             )}
           </Timeline>
 
-          <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-            <Button
-              variant="outlined"
-              onClick={() => navigate('/policies')}
-            >
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+            <Button variant="outlined" onClick={onBack}>
               Back to Policies
             </Button>
-            {policy.status === 'active' && (
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleClaim}
-                disabled={claimLoading}
-              >
-                {claimLoading ? 'Processing...' : 'Claim Compensation'}
+            {policy.status.toLowerCase() === 'active' && (
+              <Button variant="contained" onClick={onClaim} disabled={claimLoading}>
+                {claimLoading ? <CircularProgress size={24} /> : 'Claim Compensation'}
               </Button>
             )}
           </Box>
