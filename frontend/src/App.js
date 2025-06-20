@@ -3,9 +3,20 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { WalletKitProvider } from '@mysten/wallet-kit';
+import { WalletProvider, SuiClientProvider } from '@mysten/dapp-kit';
+import { getFullnodeUrl } from '@mysten/sui.js/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
 import { lazy } from 'react';
+
+const queryClient = new QueryClient();
+
+const networks = {
+  devnet: { url: getFullnodeUrl('devnet') },
+  testnet: { url: getFullnodeUrl('testnet') },
+  mainnet: { url: getFullnodeUrl('mainnet') },
+};
 
 const theme = createTheme({
   palette: {
@@ -78,19 +89,25 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <WalletKitProvider>
-          <Router>
-            <React.Suspense fallback={<LoadingScreen />}>
-              <Navbar />
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/flight-insurance" element={<FlightInsurance />} />
-                <Route path="/policies" element={<Policies />} />
-                <Route path="/policies/:id" element={<PolicyDetails />} />
-              </Routes>
-            </React.Suspense>
-          </Router>
-        </WalletKitProvider>
+        <QueryClientProvider client={queryClient}>
+          <SuiClientProvider networks={networks} defaultNetwork="devnet">
+            <WalletProvider>
+              <WalletKitProvider>
+                <Router>
+                  <React.Suspense fallback={<LoadingScreen />}>
+                    <Navbar />
+                    <Routes>
+                      <Route path="/" element={<Home />} />
+                      <Route path="/flight-insurance" element={<FlightInsurance />} />
+                      <Route path="/policies" element={<Policies />} />
+                      <Route path="/policies/:id" element={<PolicyDetails />} />
+                    </Routes>
+                  </React.Suspense>
+                </Router>
+              </WalletKitProvider>
+            </WalletProvider>
+          </SuiClientProvider>
+        </QueryClientProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

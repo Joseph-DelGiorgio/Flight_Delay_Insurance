@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -13,26 +13,24 @@ import {
   StepLabel,
   CircularProgress,
   Alert,
-  Autocomplete,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   InputAdornment,
-  Tooltip,
-  IconButton,
-  useTheme,
-  useMediaQuery
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
+  ListItemIcon,
+  Chip,
+  Card,
+  CardContent,
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import { useWalletKit } from '@mysten/wallet-kit';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { contractService } from '../services/contractService';
 import { flightService } from '../services/flightService';
-import InfoIcon from '@mui/icons-material/Info';
 import SearchIcon from '@mui/icons-material/Search';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import CheckIcon from '@mui/icons-material/Check';
 
 const steps = ['Flight Details', 'Insurance Options', 'Review & Purchase'];
 
@@ -60,15 +58,24 @@ const itemVariants = {
 
 function FlightInsurance() {
   const navigate = useNavigate();
-  const { currentAccount, signAndExecuteTransaction } = useWalletKit();
+  const { currentAccount } = useWalletKit();
+  const { mutate: signAndExecuteTransaction, isPending } = useSignAndExecuteTransaction({
+    onSuccess: () => {
+      setSuccess('Insurance purchased successfully!');
+      setTimeout(() => {
+        navigate('/policies');
+      }, 2000);
+    },
+    onError: (err) => {
+      setError(err.message);
+    }
+  });
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const [formData, setFormData] = useState({
     flightNumber: '',
@@ -76,11 +83,23 @@ function FlightInsurance() {
     departureDate: '',
     departureAirport: '',
     arrivalAirport: '',
-    coverageAmount: '',
-    selectedFlight: null
+    coverageAmount: '0.5',
+    selectedFlight: null,
+    insurancePackage: '',
+    premium: 0
   });
 
   const [validationErrors, setValidationErrors] = useState({});
+
+  const calculatePremium = (coverage, pkg) => {
+    const rate = pkg === 'basic' ? 0.01 : 0.02;
+    return parseFloat(coverage) * rate;
+  };
+
+  const handlePackageSelect = (pkg) => {
+    const premium = calculatePremium(formData.coverageAmount, pkg);
+    setFormData({ ...formData, insurancePackage: pkg, premium });
+  };
 
   const validateStep = async (step) => {
     const errors = {};
@@ -108,33 +127,16 @@ function FlightInsurance() {
         if (!formData.arrivalAirport) {
           errors.arrivalAirport = 'Arrival airport is required';
         }
-        if (Object.keys(errors).length === 0 && formData.selectedFlight) {
-          try {
-            setLoading(true);
-            const validation = await flightService.validateFlightDetails(
-              formData.flightNumber,
-              formData.airline,
-              formData.departureDate
-            );
-            if (!validation.isValid) {
-              errors.flightDetails = validation.error;
-            }
-          } catch (err) {
-            errors.flightDetails = err.message;
-          } finally {
-            setLoading(false);
-          }
-        }
         break;
 
       case 1:
-        if (!formData.coverageAmount) {
-          errors.coverageAmount = 'Coverage amount is required';
-        } else {
-          const amount = parseFloat(formData.coverageAmount);
-          if (isNaN(amount) || amount <= 0) {
-            errors.coverageAmount = 'Coverage amount must be greater than 0';
-          }
+        if (!formData.coverageAmount || parseFloat(formData.coverageAmount) <= 0) {
+          errors.coverageAmount = 'Valid coverage amount is required';
+        } else if (parseFloat(formData.coverageAmount) > 100) {
+          errors.coverageAmount = 'Coverage cannot exceed 100 SUI';
+        }
+        if (!formData.insurancePackage) {
+          errors.insurancePackage = 'Please select an insurance package';
         }
         break;
 
@@ -168,23 +170,17 @@ function FlightInsurance() {
       setError('');
       setSuccess('');
 
-      // Convert departureDate to timestamp (u64)
       const departureTimestamp = new Date(formData.departureDate).getTime();
 
-      // Calculate premium (for now, using a simple 5% of coverage amount)
-      const premium = parseFloat(formData.coverageAmount) * 0.05;
-
-      // Create transaction
-      const txb = await contractService.purchaseInsurance(
-        { signAndExecuteTransaction },
+      const txb = contractService.createPolicyTransaction(
         { ...formData, departureDate: departureTimestamp },
-        parseFloat(formData.coverageAmount)
+        parseFloat(formData.coverageAmount),
+        formData.premium
       );
 
-      setSuccess('Insurance purchased successfully!');
-      setTimeout(() => {
-        navigate('/policies');
-      }, 2000);
+      signAndExecuteTransaction({
+        transactionBlock: txb,
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -238,6 +234,7 @@ function FlightInsurance() {
           <motion.div variants={itemVariants}>
             <Grid container spacing={3}>
               <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>Find Your Flight</Typography>
                 <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
                   <TextField
                     label="Flight Number"
@@ -272,33 +269,36 @@ function FlightInsurance() {
                     <Typography variant="subtitle1" gutterBottom>
                       Search Results
                     </Typography>
-                    {searchResults.map((flight, index) => (
-                      <Button
-                        key={index}
-                        variant="outlined"
-                        fullWidth
-                        sx={{ mb: 1, justifyContent: 'flex-start' }}
-                        onClick={() => handleFlightSelect(flight)}
-                      >
-                        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                          <FlightTakeoffIcon sx={{ mr: 1 }} />
-                          <Box sx={{ flex: 1 }}>
-                            <Typography variant="body1">
-                              {flight.airline} {flight.flightNumber}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {flight.departure.airport} → {flight.arrival.airport}
-                            </Typography>
-                          </Box>
+                    <List>
+                      {searchResults.map((flight, index) => (
+                        <ListItem 
+                          button 
+                          key={index} 
+                          onClick={() => handleFlightSelect(flight)}
+                          divider={index < searchResults.length - 1}
+                        >
+                          <ListItemIcon>
+                            <FlightTakeoffIcon />
+                          </ListItemIcon>
+                          <ListItemText 
+                            primary={`${flight.airline} ${flight.flightNumber}`}
+                            secondary={`${flight.departure.airport} to ${flight.arrival.airport}`}
+                          />
                           <Typography variant="body2" color="text.secondary">
-                            {new Date(flight.departure.scheduled).toLocaleString()}
+                            {new Date(flight.departure.scheduled).toLocaleDateString()}
                           </Typography>
-                        </Box>
-                      </Button>
-                    ))}
+                        </ListItem>
+                      ))}
+                    </List>
                   </Paper>
                 </Grid>
               )}
+
+              <Grid item xs={12}>
+                <Divider sx={{ my: 2 }}>
+                  <Chip label="Or Enter Manually" />
+                </Divider>
+              </Grid>
 
               <Grid item xs={12} sm={6}>
                 <TextField
@@ -343,6 +343,7 @@ function FlightInsurance() {
           <motion.div variants={itemVariants}>
             <Grid container spacing={3}>
               <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>1. Set Your Coverage Amount</Typography>
                 <TextField
                   label="Coverage Amount"
                   type="number"
@@ -352,28 +353,61 @@ function FlightInsurance() {
                   helperText={validationErrors.coverageAmount}
                   fullWidth
                   InputProps={{
-                    startAdornment: <InputAdornment position="start">₽</InputAdornment>,
+                    startAdornment: <InputAdornment position="start">SUI</InputAdornment>,
                   }}
                 />
               </Grid>
               <Grid item xs={12}>
-                <Paper sx={{ p: 2, bgcolor: 'background.default' }}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Coverage Details
-                  </Typography>
-                  <Typography variant="body2" paragraph>
-                    • Coverage for delays over 2 hours
-                  </Typography>
-                  <Typography variant="body2" paragraph>
-                    • Automatic payout for eligible delays
-                  </Typography>
-                  <Typography variant="body2" paragraph>
-                    • No claim forms required
-                  </Typography>
-                  <Typography variant="body2">
-                    • Coverage valid for 24 hours from scheduled departure
-                  </Typography>
-                </Paper>
+                <Typography variant="h6" gutterBottom>2. Choose Your Package</Typography>
+                {!!validationErrors.insurancePackage && <Alert severity="error" sx={{ mb: 2 }}>{validationErrors.insurancePackage}</Alert>}
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card 
+                  onClick={() => handlePackageSelect('basic')}
+                  sx={{ 
+                    cursor: 'pointer',
+                    border: formData.insurancePackage === 'basic' ? '2px solid' : '1px solid',
+                    borderColor: formData.insurancePackage === 'basic' ? 'primary.main' : 'divider'
+                  }}
+                >
+                  <CardContent>
+                    <Typography variant="h5" component="div" gutterBottom>
+                      Basic Protection
+                    </Typography>
+                    <Typography variant="h6" color="primary" gutterBottom>
+                      {calculatePremium(formData.coverageAmount, 'basic')} SUI Premium
+                    </Typography>
+                    <List dense>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="Flight Cancellation" /></ListItem>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="Missed Connections" /></ListItem>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="Baggage Delay" /></ListItem>
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Card 
+                  onClick={() => handlePackageSelect('comprehensive')}
+                  sx={{ 
+                    cursor: 'pointer',
+                    border: formData.insurancePackage === 'comprehensive' ? '2px solid' : '1px solid',
+                    borderColor: formData.insurancePackage === 'comprehensive' ? 'primary.main' : 'divider'
+                  }}
+                >
+                  <CardContent>
+                    <Typography variant="h5" component="div" gutterBottom>
+                      Comprehensive Protection
+                    </Typography>
+                     <Typography variant="h6" color="primary" gutterBottom>
+                      {calculatePremium(formData.coverageAmount, 'comprehensive')} SUI Premium
+                    </Typography>
+                    <List dense>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="All Basic Coverage" /></ListItem>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="Medical Emergencies" /></ListItem>
+                      <ListItem><ListItemIcon><CheckIcon fontSize="small" /></ListItemIcon><ListItemText primary="Trip Interruption" /></ListItem>
+                    </List>
+                  </CardContent>
+                </Card>
               </Grid>
             </Grid>
           </motion.div>
@@ -382,39 +416,51 @@ function FlightInsurance() {
       case 2:
         return (
           <motion.div variants={itemVariants}>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <Paper sx={{ p: 3 }}>
-                  <Typography variant="h6" gutterBottom>
-                    Review Your Insurance
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Review Your Insurance
+              </Typography>
+              <Divider sx={{ my: 2 }} />
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Flight Details
                   </Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="subtitle2" color="text.secondary">
-                        Flight Details
-                      </Typography>
-                      <Typography variant="body1">
-                        {formData.airline} {formData.flightNumber}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {formData.departureAirport} → {formData.arrivalAirport}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {new Date(formData.departureDate).toLocaleDateString()}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="subtitle2" color="text.secondary">
-                        Coverage
-                      </Typography>
-                      <Typography variant="body1">
-                        ₽{formData.coverageAmount}
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                </Paper>
+                  <Typography variant="body1">
+                    {formData.airline} {formData.flightNumber}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {formData.departureAirport} → {formData.arrivalAirport}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {new Date(formData.departureDate).toLocaleDateString()}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Policy
+                  </Typography>
+                  <Typography variant="body1">
+                    Package: <Chip label={formData.insurancePackage} size="small" sx={{ textTransform: 'capitalize' }} />
+                  </Typography>
+                  <Typography variant="body1">
+                    Coverage: {formData.coverageAmount} SUI
+                  </Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+                    Premium: {formData.premium} SUI
+                  </Typography>
+                </Grid>
               </Grid>
-            </Grid>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSubmit}
+                disabled={isPending}
+                sx={{ mt: 2, width: '100%' }}
+              >
+                {isPending ? <CircularProgress size={24} color="inherit" /> : `Purchase for ${formData.premium} SUI`}
+              </Button>
+            </Paper>
           </motion.div>
         );
 
@@ -484,4 +530,4 @@ function FlightInsurance() {
   );
 }
 
-export default FlightInsurance; 
+export default FlightInsurance;

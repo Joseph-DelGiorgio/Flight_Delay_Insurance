@@ -1,0 +1,55 @@
+name: Flight Delay Insurance CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-ci:
+    name: Backend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Sui
+        run: |
+          wget -qO- https://get.sui.io | sh
+          export PATH="/root/.sui/bin:$PATH"
+          sui --version
+
+      - name: Build Contracts
+        run: |
+          export PATH="/root/.sui/bin:$PATH"
+          sui move build
+
+      - name: Test Contracts
+        run: |
+          export PATH="/root/.sui/bin:$PATH"
+          sui move test
+
+  frontend-ci:
+    name: Frontend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install Dependencies
+        working-directory: ./frontend
+        run: npm install --legacy-peer-deps
+
+      - name: Lint Frontend
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Test Frontend
+        working-directory: ./frontend
+        run: npm test 

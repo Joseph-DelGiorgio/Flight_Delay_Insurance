@@ -1,124 +1,112 @@
-import { JsonRpcProvider, Connection } from '@mysten/sui.js';
-import { useWalletKit } from '@mysten/wallet-kit';
+import { JsonRpcProvider, Connection, TransactionBlock } from '@mysten/sui.js';
 
 // Initialize Sui client
 const connection = new Connection({
-  fullnode: 'https://fullnode.mainnet.sui.io',
-  faucet: 'https://faucet.mainnet.sui.io'
+  fullnode: 'https://fullnode.devnet.sui.io', // Using devnet
+  faucet: 'https://faucet.devnet.sui.io',
 });
 const provider = new JsonRpcProvider(connection);
 
-// Contract addresses and object IDs
-const CONTRACT_ADDRESS = '0x...'; // Replace with your deployed contract address
-const FLIGHT_ORACLE_ADDRESS = '0x...'; // Replace with your oracle address
+const CONTRACT_ADDRESS = '0xa3c42824eb667f74c42a76a62d218e420d7031459350ac52ac34e133008a0974'; 
+const INSURANCE_POOL_ID = '0xa9460a5641a90dba113a7e1bdeb83125769101028b3612c830c4a5420f725c7c'; 
 
 export const contractService = {
-  async purchaseInsurance(walletAddress, flightDetails, coverageAmount) {
+  createPolicyTransaction(flightDetails, coverageAmount, premiumAmount) {
     try {
-      const txb = await provider.moveCall({
-        target: `${CONTRACT_ADDRESS}::flight_insurance::purchase_insurance`,
-        arguments: [
-          flightDetails.flightNumber,
-          flightDetails.airline,
-          flightDetails.departureDate,
-          flightDetails.departureAirport,
-          flightDetails.arrivalAirport,
-          coverageAmount
-        ],
-        typeArguments: []
-      });
+      const txb = new TransactionBlock();
 
-      const result = await provider.executeTransaction(txb);
-      return result;
+      const premiumInMIST = Math.round(premiumAmount * 1_000_000_000);
+      const coverageInMIST = Math.round(coverageAmount * 1_000_000_000);
+
+      const [premiumCoin] = txb.splitCoins(txb.gas, [txb.pure(premiumInMIST)]);
+
+      txb.moveCall({
+        target: `${CONTRACT_ADDRESS}::flight_insurance::create_policy`,
+        arguments: [
+          txb.object(INSURANCE_POOL_ID),
+          txb.pure(Array.from(new TextEncoder().encode(flightDetails.flightNumber))),
+          txb.pure(Array.from(new TextEncoder().encode(flightDetails.airline))),
+          txb.pure(flightDetails.departureDate),
+          txb.pure(coverageInMIST),
+          premiumCoin,
+        ],
+        typeArguments: [],
+      });
+      
+      return txb;
     } catch (error) {
-      console.error('Error purchasing insurance:', error);
-      throw new Error('Failed to purchase insurance. Please try again.');
+      console.error('Error creating policy transaction:', error);
+      throw new Error('Failed to create policy transaction. Please check the console for details.');
     }
   },
 
   async getPolicies(walletAddress) {
+    if (!walletAddress) {
+      return [];
+    }
     try {
-      const policies = await provider.getObject({
-        id: `${CONTRACT_ADDRESS}::flight_insurance::get_policies`,
-        options: {
-          showContent: true,
-          showOwner: true
-        }
+      const policyObjects = await provider.getOwnedObjects({
+        owner: walletAddress,
+        filter: { StructType: `${CONTRACT_ADDRESS}::flight_insurance::Policy` },
+        options: { showContent: true, showType: true },
       });
 
-      return policies.data.content.fields.policies.map(policy => ({
-        id: policy.id,
-        flightNumber: policy.flight_number,
-        airline: policy.airline,
-        departureDate: policy.departure_date,
-        departureAirport: policy.departure_airport,
-        arrivalAirport: policy.arrival_airport,
-        coverageAmount: policy.coverage_amount,
-        status: policy.status,
-        purchaseDate: policy.purchase_date
-      }));
+      return policyObjects.data.map(({ data }) => {
+        const fields = data.content.fields;
+        return {
+          id: fields.id.id,
+          flightNumber: String.fromCharCode.apply(null, fields.flight_number),
+          airline: String.fromCharCode.apply(null, fields.airline),
+          departureTime: new Date(Number(fields.departure_time)).toLocaleString(),
+          coverageAmount: Number(fields.coverage_amount) / 1_000_000_000,
+          premium: Number(fields.premium) / 1_000_000_000,
+          status: String.fromCharCode.apply(null, fields.status),
+          createdAt: new Date(Number(fields.created_at)).toLocaleString(),
+        };
+      });
     } catch (error) {
       console.error('Error fetching policies:', error);
-      throw new Error('Failed to fetch policies. Please try again.');
-    }
-  },
-
-  async claimCompensation(walletAddress, policyId) {
-    try {
-      const txb = await provider.moveCall({
-        target: `${CONTRACT_ADDRESS}::flight_insurance::claim_compensation`,
-        arguments: [policyId],
-        typeArguments: []
-      });
-
-      const result = await provider.executeTransaction(txb);
-      return result;
-    } catch (error) {
-      console.error('Error claiming compensation:', error);
-      throw new Error('Failed to claim compensation. Please try again.');
+      throw new Error('Failed to fetch policies.');
     }
   },
 
   async getPolicyDetails(policyId) {
     try {
-      const policy = await provider.getObject({
+      const response = await provider.getObject({
         id: policyId,
-        options: {
-          showContent: true,
-          showOwner: true
-        }
+        options: { showContent: true },
       });
-
+      
+      const fields = response.data.content.fields;
       return {
-        id: policy.data.content.fields.id,
-        flightNumber: policy.data.content.fields.flight_number,
-        airline: policy.data.content.fields.airline,
-        departureDate: policy.data.content.fields.departure_date,
-        departureAirport: policy.data.content.fields.departure_airport,
-        arrivalAirport: policy.data.content.fields.arrival_airport,
-        coverageAmount: policy.data.content.fields.coverage_amount,
-        status: policy.data.content.fields.status,
-        purchaseDate: policy.data.content.fields.purchase_date,
-        claimHistory: policy.data.content.fields.claim_history || []
+        id: fields.id.id,
+        flightNumber: String.fromCharCode.apply(null, fields.flight_number),
+        airline: String.fromCharCode.apply(null, fields.airline),
+        departureTime: new Date(Number(fields.departure_time)).toLocaleString(),
+        coverageAmount: Number(fields.coverage_amount) / 1_000_000_000,
+        premium: Number(fields.premium) / 1_000_000_000,
+        status: String.fromCharCode.apply(null, fields.status),
+        createdAt: new Date(Number(fields.created_at)).toLocaleString(),
       };
     } catch (error) {
       console.error('Error fetching policy details:', error);
-      throw new Error('Failed to fetch policy details. Please try again.');
+      throw new Error('Failed to fetch policy details.');
     }
   },
 
-  async checkFlightStatus(flightNumber, airline) {
-    try {
-      const status = await provider.moveCall({
-        target: `${FLIGHT_ORACLE_ADDRESS}::flight_oracle::get_flight_status`,
-        arguments: [flightNumber, airline],
-        typeArguments: []
-      });
+  claimCompensationTransaction(policyId) {
+    const simulatedDelay = 1500;
 
-      return status;
-    } catch (error) {
-      console.error('Error checking flight status:', error);
-      throw new Error('Failed to check flight status. Please try again.');
-    }
+    const txb = new TransactionBlock();
+    txb.moveCall({
+        target: `${CONTRACT_ADDRESS}::flight_insurance::process_claim`,
+        arguments: [
+            txb.object(INSURANCE_POOL_ID),
+            txb.object(policyId),
+            txb.pure(simulatedDelay)
+        ],
+        typeArguments: [],
+    });
+    return txb;
   }
-}; 
+};

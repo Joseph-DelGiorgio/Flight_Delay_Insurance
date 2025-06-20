@@ -13,7 +13,6 @@ import {
   useMediaQuery,
   IconButton,
   Tooltip,
-  Fade,
   Paper,
   Divider
 } from '@mui/material';
@@ -171,7 +170,7 @@ function InfoDialog({ open, title, onClose }) {
 
 function Home() {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  useMediaQuery(theme.breakpoints.down('sm'));
   const [selectedInfo, setSelectedInfo] = useState(null);
 
   const handleInfoClick = (title) => {

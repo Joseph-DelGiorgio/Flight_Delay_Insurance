@@ -1,256 +1,197 @@
 #[test_only]
 module flight_insurance::flight_insurance_tests {
     use sui::test_scenario::{Self as ts, Scenario};
-    use sui::test_utils::assert_eq;
-    use sui::clock::{Self, Clock};
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
     use sui::object::{Self, ID};
-    use flight_insurance::flight_insurance::{Self, FlightPolicy, InsurancePool};
+    use sui::balance;
+    use sui::clock::{Self, Clock};
+    use sui::test_utils::assert_eq;
+
+    use flight_insurance::flight_insurance::{
+        Self, Policy, InsurancePool,
+        PolicyCreated, ClaimProcessed
+    };
     use flight_insurance::oracle::{Self, Oracle};
-    use std::string;
 
     // Test addresses
     const ADMIN: address = @0xAD;
     const USER: address = @0xB0B;
-    const ORACLE: address = @0x0RACL3;
+    const ORACLE_PROVIDER: address = @0x0C1;
 
     // Test constants
     const FLIGHT_NUMBER: vector<u8> = b"AA123";
-    const DELAY_THRESHOLD: u64 = 60; // 1 hour
-    const PREMIUM: u64 = 10000000; // 0.01 SUI
-    const PAYOUT: u64 = 100000000; // 0.1 SUI
+    const AIRLINE: vector<u8> = b"SuiAir";
+    const DEPARTURE_TIME: u64 = 172800000; // In milliseconds
+    const COVERAGE: u64 = 100_000_000; // 0.1 SUI
+    const PREMIUM: u64 = 5_000_000; // 0.005 SUI
+    const DELAY_THRESHOLD_MINUTES: u64 = 30;
 
-    fun setup_test(): Scenario {
-        let scenario = ts::begin(ADMIN);
+    fun setup_test_scenario(): (Scenario, ID, ID) {
+        let mut scenario = ts::begin(ADMIN);
         
-        // Initialize the insurance pool
+        // Init the insurance pool
         {
             flight_insurance::init(ts::ctx(&mut scenario));
         };
-        
-        // Create test coins
+
+        // Init the oracle and authorize the provider
         {
-            let ctx = ts::ctx(&mut scenario);
-            let coin = coin::mint_for_testing(PREMIUM, ctx);
-            ts::transfer(&mut scenario, coin, USER);
+            oracle::init(ts::ctx(&mut scenario));
+            let oracle_obj = ts::take_shared<Oracle>(&scenario);
+            oracle::add_authorized_caller(&mut oracle_obj, ORACLE_PROVIDER, ts::ctx(&mut scenario));
+            ts::return_shared(oracle_obj);
         };
 
-        scenario
+        // Get pool and oracle IDs for later use
+        let pool_id = ts::most_recent_shared_object_id<InsurancePool>(&scenario);
+        let oracle_id = ts::most_recent_shared_object_id<Oracle>(&scenario);
+
+        // Give the user some SUI
+        ts::next_tx(&mut scenario, USER);
+        {
+            let coin = coin::mint_for_testing<SUI>(PREMIUM, ts::ctx(&mut scenario));
+            ts::transfer_to_sender(&mut scenario, coin);
+        };
+
+        (scenario, pool_id, oracle_id)
     }
 
     #[test]
-    fun test_create_policy() {
-        let scenario = setup_test();
-        let current_time = 1000;
-        let scheduled_departure = current_time + 3600; // 1 hour from now
-        let scheduled_arrival = scheduled_departure + 7200; // 2 hours after departure
+    fun test_create_and_get_policy() {
+        let (mut scenario, pool_id, _) = setup_test_scenario();
 
+        ts::next_tx(&mut scenario, USER);
+        
         // Create a policy
         {
-            let ctx = ts::ctx(&mut scenario);
-            let clock = clock::create_for_testing(ctx, current_time);
-            let premium = ts::take_from_sender<Coin<SUI>>(&scenario);
+            let pool = ts::borrow_shared_mut<InsurancePool>(&mut scenario, pool_id);
+            let premium_coin = ts::take_from_sender<Coin<SUI>>(&scenario);
             
             flight_insurance::create_policy(
-                ts::take_shared<InsurancePool>(&scenario),
+                pool,
                 FLIGHT_NUMBER,
-                scheduled_departure,
-                scheduled_arrival,
-                DELAY_THRESHOLD,
-                premium,
-                PAYOUT,
-                &clock,
-                ctx
+                AIRLINE,
+                DEPARTURE_TIME,
+                COVERAGE,
+                premium_coin,
+                ts::ctx(&mut scenario)
             );
         };
 
-        // Verify policy creation
+        ts::assert_last_event<PolicyCreated>(&scenario, |e| {
+            assert_eq(e.owner, USER);
+            assert_eq(e.flight_number, FLIGHT_NUMBER);
+            assert_eq(e.premium, PREMIUM);
+            assert_eq(e.coverage_amount, COVERAGE);
+        });
+
+        // Verify policy details
         {
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let (holder, flight_num, _, _, threshold, premium, payout, status, _, _) = 
-                flight_insurance::get_policy_details(&policy);
+            let pool = ts::borrow_shared<InsurancePool>(&scenario, pool_id);
+            let user_policies = flight_insurance::get_policies(pool, USER);
+            assert_eq(vector::length(&user_policies), 1);
+            let policy_id = *vector::borrow(&user_policies, 0);
             
-            assert_eq(holder, USER);
-            assert_eq(flight_num, string::utf8(FLIGHT_NUMBER));
-            assert_eq(threshold, DELAY_THRESHOLD);
+            let policy: &Policy = ts::read_object(&scenario, policy_id);
+            let (owner, flight, airline, _, coverage, premium, status, _) = 
+                flight_insurance::get_policy_details(policy);
+            
+            assert_eq(owner, USER);
+            assert_eq(flight, FLIGHT_NUMBER);
+            assert_eq(airline, AIRLINE);
+            assert_eq(coverage, COVERAGE);
             assert_eq(premium, PREMIUM);
-            assert_eq(payout, PAYOUT);
-            assert_eq(status, 0); // active status
-            
-            ts::return_to_sender(&scenario, policy);
+            assert_eq(status, b"ACTIVE");
         };
 
         ts::end(scenario);
     }
 
     #[test]
-    fun test_cancel_policy() {
-        let scenario = setup_test();
-        let current_time = 1000;
-        let scheduled_departure = current_time + 3600;
-        let scheduled_arrival = scheduled_departure + 7200;
+    fun test_process_claim_approved() {
+        let (mut scenario, pool_id, oracle_id) = setup_test_scenario();
 
+        ts::next_tx(&mut scenario, USER);
+        
         // Create a policy first
         {
-            let ctx = ts::ctx(&mut scenario);
-            let clock = clock::create_for_testing(ctx, current_time);
-            let premium = ts::take_from_sender<Coin<SUI>>(&scenario);
-            
-            flight_insurance::create_policy(
-                ts::take_shared<InsurancePool>(&scenario),
-                FLIGHT_NUMBER,
-                scheduled_departure,
-                scheduled_arrival,
-                DELAY_THRESHOLD,
-                premium,
-                PAYOUT,
-                &clock,
-                ctx
-            );
+            let pool = ts::borrow_shared_mut<InsurancePool>(&mut scenario, pool_id);
+            let premium_coin = ts::take_from_sender<Coin<SUI>>(&scenario);
+            flight_insurance::create_policy(pool, FLIGHT_NUMBER, AIRLINE, DEPARTURE_TIME, COVERAGE, premium_coin, ts::ctx(&mut scenario));
         };
 
-        // Cancel the policy
+        // Oracle processes the flight as delayed
+        ts::next_tx(&mut scenario, ORACLE_PROVIDER);
         {
-            let ctx = ts::ctx(&mut scenario);
-            let clock = clock::create_for_testing(ctx, current_time + 1800); // 30 minutes after creation
-            
-            flight_insurance::cancel_policy(
-                ts::take_from_sender<FlightPolicy>(&scenario),
-                ts::take_shared<InsurancePool>(&scenario),
-                &clock,
-                ctx
-            );
+            let pool = ts::borrow_shared_mut<InsurancePool>(&mut scenario, pool_id);
+            let user_policies = flight_insurance::get_policies(pool, USER);
+            let policy_id = *vector::borrow(&user_policies, 0);
+
+            // Simulate a delay of 45 minutes, which is over the threshold
+            flight_insurance::process_claim(pool, policy_id, 45, ts::ctx(&mut scenario));
         };
 
-        // Verify cancellation
-        {
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let status = flight_insurance::get_policy_status(&policy);
-            assert_eq(status, 2); // cancelled status
-            ts::return_to_sender(&scenario, policy);
-        };
+        // Check event
+        ts::assert_last_event<ClaimProcessed>(&scenario, |e| {
+            assert_eq(e.owner, USER);
+            assert_eq(e.amount, COVERAGE);
+            assert_eq(e.status, b"APPROVED");
+        });
 
-        ts::end(scenario);
-    }
-
-    #[test]
-    fun test_process_delayed_flight() {
-        let scenario = setup_test();
-        
-        // Create a policy
+        // Verify user received the payout
+        ts::next_tx(&mut scenario, USER);
         {
-            let pool = ts::take_from_sender<InsurancePool>(&scenario);
-            let premium = coin::mint_for_testing(PREMIUM, ts::ctx(&mut scenario));
-            
-            flight_insurance::create_policy(
-                &mut pool,
-                FLIGHT_NUMBER,
-                SCHEDULED_DEPARTURE,
-                SCHEDULED_ARRIVAL,
-                DELAY_THRESHOLD,
-                premium,
-                PAYOUT,
-                ts::clock(&scenario),
-                ts::ctx(&mut scenario)
-            );
-            
-            ts::return_to_sender(&scenario, pool);
-        };
-        
-        // Submit delayed flight data
-        {
-            let oracle_obj = ts::take_from_sender<Oracle>(&scenario);
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let pool = ts::take_from_sender<InsurancePool>(&scenario);
-            
-            // Simulate 45-minute delay
-            let actual_arrival = SCHEDULED_ARRIVAL + (45 * 60);
-            
-            oracle::submit_flight_data(
-                &oracle_obj,
-                &mut policy,
-                &mut pool,
-                FLIGHT_NUMBER,
-                actual_arrival,
-                ts::ctx(&mut scenario)
-            );
-            
-            ts::return_to_sender(&scenario, oracle_obj);
-            ts::return_to_sender(&scenario, policy);
-            ts::return_to_sender(&scenario, pool);
-        };
-        
-        // Verify policy status
-        {
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let (_, _, _, _, _, _, _, status) = flight_insurance::get_policy_details(&policy);
-            
-            assert_eq(status, 1); // Status should be "paid out"
-            
-            ts::return_to_sender(&scenario, policy);
+            let user_balance = ts::balance_for_sender<SUI>(&scenario);
+            assert_eq(balance::value(user_balance), COVERAGE);
         };
         
         ts::end(scenario);
     }
 
     #[test]
-    fun test_process_ontime_flight() {
-        let scenario = setup_test();
+    fun test_process_claim_rejected() {
+        let (mut scenario, pool_id, oracle_id) = setup_test_scenario();
+
+        ts::next_tx(&mut scenario, USER);
         
         // Create a policy
         {
-            let pool = ts::take_from_sender<InsurancePool>(&scenario);
-            let premium = coin::mint_for_testing(PREMIUM, ts::ctx(&mut scenario));
-            
-            flight_insurance::create_policy(
-                &mut pool,
-                FLIGHT_NUMBER,
-                SCHEDULED_DEPARTURE,
-                SCHEDULED_ARRIVAL,
-                DELAY_THRESHOLD,
-                premium,
-                PAYOUT,
-                ts::clock(&scenario),
-                ts::ctx(&mut scenario)
-            );
-            
-            ts::return_to_sender(&scenario, pool);
+            let pool = ts::borrow_shared_mut<InsurancePool>(&mut scenario, pool_id);
+            let premium_coin = ts::take_from_sender<Coin<SUI>>(&scenario);
+            flight_insurance::create_policy(pool, FLIGHT_NUMBER, AIRLINE, DEPARTURE_TIME, COVERAGE, premium_coin, ts::ctx(&mut scenario));
         };
-        
-        // Submit on-time flight data
+
+        // Oracle processes the flight as on-time
+        ts::next_tx(&mut scenario, ORACLE_PROVIDER);
         {
-            let oracle_obj = ts::take_from_sender<Oracle>(&scenario);
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let pool = ts::take_from_sender<InsurancePool>(&scenario);
-            
-            // Simulate 15-minute delay (below threshold)
-            let actual_arrival = SCHEDULED_ARRIVAL + (15 * 60);
-            
-            oracle::submit_flight_data(
-                &oracle_obj,
-                &mut policy,
-                &mut pool,
-                FLIGHT_NUMBER,
-                actual_arrival,
-                ts::ctx(&mut scenario)
-            );
-            
-            ts::return_to_sender(&scenario, oracle_obj);
-            ts::return_to_sender(&scenario, policy);
-            ts::return_to_sender(&scenario, pool);
+            let pool = ts::borrow_shared_mut<InsurancePool>(&mut scenario, pool_id);
+            let user_policies = flight_insurance::get_policies(pool, USER);
+            let policy_id = *vector::borrow(&user_policies, 0);
+
+            // Simulate a delay of 15 minutes, which is under the threshold
+            flight_insurance::process_claim(pool, policy_id, 15, ts::ctx(&mut scenario));
         };
-        
-        // Verify policy status
+
+        // Check event
+        ts::assert_last_event<ClaimProcessed>(&scenario, |e| {
+            assert_eq(e.owner, USER);
+            assert_eq(e.amount, 0);
+            assert_eq(e.status, b"REJECTED");
+        });
+
+        // Verify policy status is rejected
         {
-            let policy = ts::take_from_sender<FlightPolicy>(&scenario);
-            let (_, _, _, _, _, _, _, status) = flight_insurance::get_policy_details(&policy);
+             let pool = ts::borrow_shared<InsurancePool>(&scenario, pool_id);
+            let user_policies = flight_insurance::get_policies(pool, USER);
+            let policy_id = *vector::borrow(&user_policies, 0);
             
-            assert_eq(status, 0); // Status should still be "active"
+            let policy: &Policy = ts::read_object(&scenario, policy_id);
+            let (_, _, _, _, _, _, status, _) = flight_insurance::get_policy_details(policy);
             
-            ts::return_to_sender(&scenario, policy);
+            assert_eq(status, b"REJECTED");
         };
-        
+
         ts::end(scenario);
     }
 } 

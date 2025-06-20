@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -7,14 +7,11 @@ import {
   Paper,
   Grid,
   Button,
-  Chip,
   CircularProgress,
   Alert,
-  Divider,
-  IconButton,
-  Tooltip,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Divider
 } from '@mui/material';
 import {
   Timeline,
@@ -24,44 +21,13 @@ import {
   TimelineContent,
   TimelineDot
 } from '@mui/lab';
-import { motion } from 'framer-motion';
 import { useWalletKit } from '@mysten/wallet-kit';
 import { contractService } from '../services/contractService';
-import { flightService } from '../services/flightService';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import LocationOnIcon from '@mui/icons-material/LocationOn';
+import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorIcon from '@mui/icons-material/Error';
-import PendingIcon from '@mui/icons-material/Pending';
-import DownloadIcon from '@mui/icons-material/Download';
-import FlightLandIcon from '@mui/icons-material/FlightLand';
-import WarningIcon from '@mui/icons-material/Warning';
-import InfoIcon from '@mui/icons-material/Info';
-
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.1
-    }
-  }
-};
-
-const itemVariants = {
-  hidden: { y: 20, opacity: 0 },
-  visible: {
-    y: 0,
-    opacity: 1,
-    transition: {
-      duration: 0.5,
-      ease: "easeOut"
-    }
-  }
-};
+import CancelIcon from '@mui/icons-material/Cancel';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import PaidIcon from '@mui/icons-material/Paid';
 
 function PolicyDetails() {
   const { policyId } = useParams();
@@ -70,12 +36,11 @@ function PolicyDetails() {
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [flightStatus, setFlightStatus] = useState(null);
   const [claimLoading, setClaimLoading] = useState(false);
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  useMediaQuery(theme.breakpoints.down('sm'));
 
-  const fetchPolicyDetails = async () => {
+  const fetchPolicyDetails = useCallback(async () => {
     try {
       const result = await contractService.getPolicyDetails(policyId);
       // Parse the returned data into a more usable format
@@ -90,14 +55,12 @@ function PolicyDetails() {
         claimAmount: result[7]
       };
       setPolicy(parsedPolicy);
-      // Fetch current flight status
-      // TODO: Use contractService.checkFlightStatus if needed
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [policyId]);
 
   useEffect(() => {
     if (currentAccount) {
@@ -106,7 +69,7 @@ function PolicyDetails() {
       setError('Please connect your wallet to view policy details');
       setLoading(false);
     }
-  }, [currentAccount, policyId]);
+  }, [currentAccount, policyId, fetchPolicyDetails]);
 
   const handleClaim = async () => {
     try {
@@ -117,34 +80,6 @@ function PolicyDetails() {
       setError(err.message);
     } finally {
       setClaimLoading(false);
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active':
-        return 'success';
-      case 'pending':
-        return 'warning';
-      case 'claimed':
-        return 'info';
-      case 'expired':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  const getTimelineIcon = (status) => {
-    switch (status) {
-      case 'success':
-        return <CheckCircleIcon />;
-      case 'error':
-        return <ErrorIcon />;
-      case 'pending':
-        return <PendingIcon />;
-      default:
-        return <CheckCircleIcon />;
     }
   };
 
@@ -254,6 +189,66 @@ function PolicyDetails() {
               </Grid>
             )}
           </Grid>
+          
+          <Divider sx={{ my: 3 }} />
+
+          <Typography variant="h6" gutterBottom>
+            Policy History
+          </Typography>
+          <Timeline position="alternate">
+            <TimelineItem>
+              <TimelineSeparator>
+                <TimelineDot color="primary">
+                  <EventIcon />
+                </TimelineDot>
+                <TimelineConnector />
+              </TimelineSeparator>
+              <TimelineContent>
+                <Typography variant="h6" component="span">
+                  Policy Created
+                </Typography>
+                <Typography>{new Date(policy.departureDate).toLocaleDateString()}</Typography>
+              </TimelineContent>
+            </TimelineItem>
+
+            {policy.status.toLowerCase() !== 'active' && (
+              <TimelineItem>
+                <TimelineSeparator>
+                  <TimelineDot color={
+                    policy.status.toLowerCase() === 'claimed' ? 'success' : 
+                    policy.status.toLowerCase() === 'rejected' ? 'error' : 
+                    'grey'
+                  }>
+                    {policy.status.toLowerCase() === 'claimed' ? <PaidIcon /> : 
+                     policy.status.toLowerCase() === 'rejected' ? <CancelIcon /> : 
+                     <CheckCircleIcon />}
+                  </TimelineDot>
+                </TimelineSeparator>
+                <TimelineContent>
+                  <Typography variant="h6" component="span">
+                    Policy Resolved
+                  </Typography>
+                  <Typography>Status: {policy.status}</Typography>
+                </TimelineContent>
+              </TimelineItem>
+            )}
+
+            {policy.status.toLowerCase() === 'active' && (
+              <TimelineItem>
+                <TimelineSeparator>
+                  <TimelineDot color="grey">
+                    <HourglassEmptyIcon />
+                  </TimelineDot>
+                </TimelineSeparator>
+                <TimelineContent>
+                  <Typography variant="h6" component="span">
+                    Pending Resolution
+                  </Typography>
+                  <Typography>Awaiting flight completion</Typography>
+                </TimelineContent>
+              </TimelineItem>
+            )}
+          </Timeline>
 
           <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
             <Button
